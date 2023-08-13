@@ -10,6 +10,11 @@ packages = [{include = "cypher_direction"}]
 python = "^3.10"
 
 
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.0"
+pytest-csv-params = "^1.1.0"
+attrs = "^23.1.0"
+
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
