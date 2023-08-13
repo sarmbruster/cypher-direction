@@ -1,0 +1,15 @@
+[tool.poetry]
+name = "cypher-direction"
+version = "0.1.0"
+description = ""
+authors = ["Stefan Armbruster <stefan@armbruster-it.de>"]
+readme = "README.md"
+packages = [{include = "cypher_direction"}]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
