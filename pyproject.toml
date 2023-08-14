@@ -8,9 +8,7 @@ packages = [{include = "cypher_direction"}]
 
 [tool.poetry.dependencies]
 python = "^3.10"
-pycypher = {git = "https://github.com/Mizzlr/pycypher.git"}
-antlr4-python3-runtime = "4.7.2"  ## pycypher uses this version, recent 4.13 causes errors.
-
+antlr4-python3-runtime = "^4.13.0"  
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.0"
