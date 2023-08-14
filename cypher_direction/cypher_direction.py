@@ -21,12 +21,28 @@ class Pattern:
     def __repr__(self) -> str:
         return self.__str__()
     
-def getLabel(nodePattern) -> str:
-        labels = nodePattern.oC_NodeLabels().oC_NodeLabel()
-        if len(labels)>1:
-            raise "more than one label"
-        label = labels[0].oC_LabelName().getText()
-        return label
+def getLabel(nodePattern, namedNodes: {}) -> str:
+        nodeLabels = nodePattern.oC_NodeLabels()
+        if nodeLabels is None:
+            symbolicName = nodePattern.oC_Variable().oC_SymbolicName().getText()
+            return namedNodes.get(symbolicName, None) if namedNodes is not None else None
+        else:
+            labels = nodeLabels.oC_NodeLabel()
+            if len(labels)>1:
+                raise "more than one label"
+            label = labels[0].oC_LabelName().getText()
+            return label
+
+def fetchNamedNodes(tree) -> {}:
+    result = {}
+    for n in Trees.findAllRuleNodes(tree, CypherParser.RULE_oC_NodePattern):
+        variable = n.oC_Variable()
+        if variable is not None:
+            symbolicName = variable.oC_SymbolicName().getText()
+            label = getLabel(n, None)
+            if symbolicName is not None and label is not None:
+                result[symbolicName]=label
+    return result
 
 def extractRelationships(query: str) -> []:
     relationships = []
@@ -36,13 +52,14 @@ def extractRelationships(query: str) -> []:
     parser = CypherParser(stream)
     tree = parser.oC_Cypher()
 
-    patternElements = Trees.findAllRuleNodes(tree, CypherParser.RULE_oC_PatternElement)
-    for patternElement in patternElements:
+    namedNodes = fetchNamedNodes(tree)
 
-        startLabel = getLabel(patternElement.oC_NodePattern())
+    elements = Trees.findAllRuleNodes(tree, CypherParser.RULE_oC_PatternElement)
+    elements.extend(Trees.findAllRuleNodes(tree, CypherParser.RULE_oC_RelationshipsPattern))
 
-        patternElementChain = patternElement.oC_PatternElementChain()
-        for p in patternElementChain:
+    for r in elements:
+        startLabel = getLabel(r.oC_NodePattern(), namedNodes)
+        for p in r.oC_PatternElementChain():
             rel = p.oC_RelationshipPattern()
             left = rel.oC_LeftArrowHead()
             right = rel.oC_RightArrowHead()
@@ -51,14 +68,14 @@ def extractRelationships(query: str) -> []:
                 if len(types) > 1:
                     raise "more than one relationship type"
                 type = types[0].oC_SchemaName().getText()
-                endLabel = getLabel(p.oC_NodePattern())
+                endLabel = getLabel(p.oC_NodePattern(), namedNodes)
 
                 relationships.append(Pattern(
                     startLabel if right is not None else endLabel, 
                     type,
                     endLabel if right is not None else startLabel,
-                    rel.start.column,
-                    rel.stop.column,
+                    rel.start.start,
+                    rel.stop.stop,
                     rel.getText()
                 ))
                 startLabel = endLabel
