@@ -10,7 +10,7 @@ class Pattern:
     def __init__(self, start: str, type: str, end: str, startIndex: int, endIndex: int, text: str):
         self.start = start.strip('`')
         self.end = end.strip('`')
-        self.type = type.strip('`')
+        self.type = type.strip('`') if type is not None else None
         self.startIndex = startIndex
         self.endIndex = endIndex
         self.text = text
@@ -44,6 +44,20 @@ def fetchNamedNodes(tree) -> {}:
                 result[symbolicName]=label
     return result
 
+def getRelationshipType(rel) -> str:
+    relationshipDetail = rel.oC_RelationshipDetail()
+    if relationshipDetail is None:
+        return None
+    else:
+        types = relationshipDetail.oC_RelationshipTypes()
+        if types is None:
+            return None
+        else:
+            names = types.oC_RelTypeName()
+            if len(names) > 1:
+                raise "more than one relationship type"
+            return names[0].oC_SchemaName().getText()
+
 def extractRelationships(query: str) -> []:
     relationships = []
     input_stream = InputStream(query)
@@ -63,13 +77,9 @@ def extractRelationships(query: str) -> []:
             rel = p.oC_RelationshipPattern()
             left = rel.oC_LeftArrowHead()
             right = rel.oC_RightArrowHead()
-            if left is not None or right is not None:
-                types = rel.oC_RelationshipDetail().oC_RelationshipTypes().oC_RelTypeName()
-                if len(types) > 1:
-                    raise "more than one relationship type"
-                type = types[0].oC_SchemaName().getText()
+            if left is not None or right is not None:  # we don't care if direction is undefined
+                type = getRelationshipType(rel)           
                 endLabel = getLabel(p.oC_NodePattern(), namedNodes)
-
                 relationships.append(Pattern(
                     startLabel if right is not None else endLabel, 
                     type,
@@ -98,7 +108,7 @@ def schemaMatch(rel: Pattern, schema: Pattern) -> bool:
     return rel.start == schema.start and rel.end == schema.end and rel.type == schema.type
 
 def schemaMatchReverse(rel: Pattern, schema: Pattern) -> bool:
-    return rel.start == schema.end and rel.end == schema.start and rel.type == schema.type
+    return rel.start == schema.end and rel.end == schema.start and (rel.type == schema.type or rel.type is None)
 
 def reverse(text: str) -> str:
     """reverse the direction of a relationship pattern"""
