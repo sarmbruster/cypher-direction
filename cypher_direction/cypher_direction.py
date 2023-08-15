@@ -80,14 +80,14 @@ def extractRelationships(query: str) -> []:
     namedNodes = fetchNamedNodes(tree)
 
     elements = Trees.findAllRuleNodes(tree, CypherParser.RULE_pathPatternAtoms)
-    #elements.extend(Trees.findAllRuleNodes(tree, CypherParser.RULE_relationshipPattern)) pathPatternNotEmpy
-
+    elements.extend(Trees.findAllRuleNodes(tree, CypherParser.RULE_pathPatternNonEmpty))
     for r in elements:
         children = r.getChildren()
         startLabel = getLabel(next(children), namedNodes)
 
-        while ((relationship := next(children, None)) is not None):
-            rel = relationship.relationshipPattern()
+        while ((rel := next(children, None)) is not None):
+            if isinstance(rel, CypherParser.MaybeQuantifiedRelationshipPatternContext):
+                rel = rel.relationshipPattern()
             left = rel.leftArrow()
             right = rel.rightArrow()
             endLabel = getLabel(next(children), namedNodes)
