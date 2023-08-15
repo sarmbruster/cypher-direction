@@ -55,7 +55,10 @@ def fetchNamedNodes(tree) -> {}:
     return result
 
 def getRelationshipType(rel) -> str:
-    return rel.labelExpression().labelExpression4().getText()
+    try:
+        return rel.labelExpression().labelExpression4().getText()
+    except AttributeError:
+        return None
     # relationshipDetail = rel.oC_RelationshipDetail()
     # if relationshipDetail is None:
     #     return None
@@ -117,6 +120,27 @@ def tokenizeSchema(schema: str) -> []:
             schemaDefinitions.append(Pattern(startLabel, relType, endLabel, 0, 0, None))
     return schemaDefinitions
 
+def exactlyOne(iterator):
+    if next(iterator, None) is None:
+        return False
+    elif next(iterator, None) is None:
+            return True
+    return False
+
+def matches_both_abels_reltype(r: Pattern, schemaDefinitions: []) -> bool:
+    return any(filter(lambda s: r.start == s.start and r.end == s.end and r.type==s.type, schemaDefinitions))
+
+def matches_both_abels_reltype_opposite_direction(r: Pattern, schemaDefinitions: []) -> bool:
+    return any(filter(lambda s: r.start == s.end and r.end == s.start and r.type==s.type, schemaDefinitions))
+
+def matches_exactly_one_entry_both_labels_empty_reltype(r: Pattern, schemaDefinitions: []) -> bool:
+    return exactlyOne(filter(lambda s: r.start == s.end and r.end == s.start and r.type is None, schemaDefinitions))
+
+def matches_onelabel_and_reltype(r: Pattern, schemaDefinitions: []) -> bool:
+    return exactlyOne(filter(lambda s: (r.start is None or r.start == s.end) and (r.end is None or r.end == s.start) and r.type==s.type, schemaDefinitions))
+
+
+
 def schemaMatch(rel: Pattern, schema: Pattern) -> bool:
     return rel.start == schema.start and rel.end == schema.end and rel.type == schema.type
 
@@ -140,14 +164,24 @@ def fix_direction(query: str, schema: str):
     print(relationships)
     schemaDefinitions = tokenizeSchema(schema)
     
+
+
+    # rules for inverting relationships
+    # 1) there is a schema entry with both labels and reltype matching pointing opposite direction
+    # 2) there is exactly one schema entry with both labels matching and a unspecified reltype given
     for r in relationships:
-        if next(filter(lambda x: schemaMatch(r, x), schemaDefinitions), None):
-            print(f"{r} found in schema")
-        elif next(filter(lambda x: schemaMatchReverse(r,x), schemaDefinitions), None) or next(filter(lambda x: schemaMatchReversePartial(r, x), schemaDefinitions), None):
+
+        if (not matches_both_abels_reltype(r, schemaDefinitions) and 
+            (matches_both_abels_reltype_opposite_direction(r, schemaDefinitions) 
+            or matches_exactly_one_entry_both_labels_empty_reltype(r, schemaDefinitions)
+            or matches_onelabel_and_reltype(r, schemaDefinitions))):
+        # if next(filter(lambda x: schemaMatch(r, x), schemaDefinitions), None):
+        #     print(f"{r} found in schema")
+        # elif next(filter(lambda x: schemaMatchReverse(r,x), schemaDefinitions), None) or next(filter(lambda x: schemaMatchReversePartial(r, x), schemaDefinitions), None):
             print(f"{r} reversed found in schema {r.text}")
             reversedPattern = reverse(r.text)
             query = f"{query[:r.startIndex]}{reversedPattern}{query[r.endIndex+1:]}"
         
-        else:
-            raise(f"{r} not found in schema")
+        # else:
+        #     raise(f"{r} not found in schema")
     return query
