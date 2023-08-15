@@ -5,12 +5,15 @@ from cypher_direction.CypherLexer import CypherLexer
 from cypher_direction.CypherParser import CypherParser
 from cypher_direction.Trees import Trees
 
+def strip_or_none(s: str) -> str:
+    return None if s is None else s.strip('`')
+
 class Pattern:
     """contains normalized patterns from a cypher statement"""
     def __init__(self, start: str, type: str, end: str, startIndex: int, endIndex: int, text: str):
-        self.start = start.strip('`')
-        self.end = end.strip('`')
-        self.type = type.strip('`') if type is not None else None
+        self.start = strip_or_none(start)
+        self.end = strip_or_none(end)
+        self.type = strip_or_none(type)
         self.startIndex = startIndex
         self.endIndex = endIndex
         self.text = text
@@ -21,42 +24,47 @@ class Pattern:
     def __repr__(self) -> str:
         return self.__str__()
     
+def getSymbolicName(nodePattern) -> str:
+    return nodePattern.variable().symbolicNameString().unescapedSymbolicNameString().getText()
+    
 def getLabel(nodePattern, namedNodes: {}) -> str:
-        nodeLabels = nodePattern.oC_NodeLabels()
+        nodeLabels = nodePattern.labelExpression()
         if nodeLabels is None:
-            symbolicName = nodePattern.oC_Variable().oC_SymbolicName().getText()
+            symbolicName = getSymbolicName(nodePattern)
             return namedNodes.get(symbolicName, None) if namedNodes is not None else None
         else:
-            labels = nodeLabels.oC_NodeLabel()
-            if len(labels)>1:
+            labels3 = nodeLabels.labelExpression4().labelExpression3()
+            if len(labels3)>1:
                 raise "more than one label"
-            label = labels[0].oC_LabelName().getText()
-            return label
+            labels2 = labels3[0].labelExpression2()
+            if len(labels2) > 1:
+                raise "more than one label"
+            return labels2[0].getText()
 
 def fetchNamedNodes(tree) -> {}:
     result = {}
-    for n in Trees.findAllRuleNodes(tree, CypherParser.RULE_oC_NodePattern):
-        variable = n.oC_Variable()
-        if variable is not None:
-            symbolicName = variable.oC_SymbolicName().getText()
+    for n in Trees.findAllRuleNodes(tree, CypherParser.RULE_nodePattern):
+        symbolicName = getSymbolicName(n)
+        if symbolicName is not None:
             label = getLabel(n, None)
-            if symbolicName is not None and label is not None:
-                result[symbolicName]=label
+            if label is not None:
+                result[symbolicName] = label
     return result
 
 def getRelationshipType(rel) -> str:
-    relationshipDetail = rel.oC_RelationshipDetail()
-    if relationshipDetail is None:
-        return None
-    else:
-        types = relationshipDetail.oC_RelationshipTypes()
-        if types is None:
-            return None
-        else:
-            names = types.oC_RelTypeName()
-            if len(names) > 1:
-                raise "more than one relationship type"
-            return names[0].oC_SchemaName().getText()
+    return rel.labelExpression().labelExpression4().getText()
+    # relationshipDetail = rel.oC_RelationshipDetail()
+    # if relationshipDetail is None:
+    #     return None
+    # else:
+    #     types = relationshipDetail.oC_RelationshipTypes()
+    #     if types is None:
+    #         return None
+    #     else:
+    #         names = types.oC_RelTypeName()
+    #         if len(names) > 1:
+    #             raise "more than one relationship type"
+    #         return names[0].oC_SchemaName().getText()
 
 def extractRelationships(query: str) -> []:
     relationships = []
@@ -64,22 +72,24 @@ def extractRelationships(query: str) -> []:
     lexer = CypherLexer(input_stream)
     stream = CommonTokenStream(lexer)
     parser = CypherParser(stream)
-    tree = parser.oC_Cypher()
+    tree = parser.statements()
 
     namedNodes = fetchNamedNodes(tree)
 
-    elements = Trees.findAllRuleNodes(tree, CypherParser.RULE_oC_PatternElement)
-    elements.extend(Trees.findAllRuleNodes(tree, CypherParser.RULE_oC_RelationshipsPattern))
+    elements = Trees.findAllRuleNodes(tree, CypherParser.RULE_pathPatternAtoms)
+    #elements.extend(Trees.findAllRuleNodes(tree, CypherParser.RULE_relationshipPattern)) pathPatternNotEmpy
 
     for r in elements:
-        startLabel = getLabel(r.oC_NodePattern(), namedNodes)
-        for p in r.oC_PatternElementChain():
-            rel = p.oC_RelationshipPattern()
-            left = rel.oC_LeftArrowHead()
-            right = rel.oC_RightArrowHead()
+        children = r.getChildren()
+        startLabel = getLabel(next(children), namedNodes)
+
+        while ((relationship := next(children, None)) is not None):
+            rel = relationship.relationshipPattern()
+            left = rel.leftArrow()
+            right = rel.rightArrow()
             if left is not None or right is not None:  # we don't care if direction is undefined
                 type = getRelationshipType(rel)           
-                endLabel = getLabel(p.oC_NodePattern(), namedNodes)
+                endLabel = getLabel(next(children), namedNodes)
                 relationships.append(Pattern(
                     startLabel if right is not None else endLabel, 
                     type,
@@ -110,6 +120,9 @@ def schemaMatch(rel: Pattern, schema: Pattern) -> bool:
 def schemaMatchReverse(rel: Pattern, schema: Pattern) -> bool:
     return rel.start == schema.end and rel.end == schema.start and (rel.type == schema.type or rel.type is None)
 
+def schemaMatchReversePartial(rel: Pattern, schema: Pattern) -> bool:
+    return (rel.start is None or rel.start == schema.end) and (rel.end is None or rel.end == schema.start) and rel.type == schema.type
+
 def reverse(text: str) -> str:
     """reverse the direction of a relationship pattern"""
     if text.startswith('<'):
@@ -127,10 +140,11 @@ def fix_direction(query: str, schema: str):
     for r in relationships:
         if next(filter(lambda x: schemaMatch(r, x), schemaDefinitions), None):
             print(f"{r} found in schema")
-        elif next(filter(lambda x: schemaMatchReverse(r,x), schemaDefinitions), None):
+        elif next(filter(lambda x: schemaMatchReverse(r,x), schemaDefinitions), None) or next(filter(lambda x: schemaMatchReversePartial(r, x), schemaDefinitions), None):
             print(f"{r} reversed found in schema {r.text}")
             reversedPattern = reverse(r.text)
             query = f"{query[:r.startIndex]}{reversedPattern}{query[r.endIndex+1:]}"
+        
         else:
             raise(f"{r} not found in schema")
     return query
