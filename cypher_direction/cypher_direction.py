@@ -42,7 +42,7 @@ def getLabel(nodePattern, namedNodes: {}) -> str:
             labels2 = labels3[0].labelExpression2()
             if len(labels2) > 1:
                 raise "more than one label"
-            return labels2[0].getText()
+            return strip_or_none(labels2[0].getText())
 
 def fetchNamedNodes(tree) -> {}:
     result = {}
@@ -90,9 +90,9 @@ def extractRelationships(query: str) -> []:
             rel = relationship.relationshipPattern()
             left = rel.leftArrow()
             right = rel.rightArrow()
+            endLabel = getLabel(next(children), namedNodes)
             if left is not None or right is not None:  # we don't care if direction is undefined
                 type = getRelationshipType(rel)           
-                endLabel = getLabel(next(children), namedNodes)
                 relationships.append(Pattern(
                     startLabel if right is not None else endLabel, 
                     type,
@@ -101,7 +101,7 @@ def extractRelationships(query: str) -> []:
                     rel.stop.stop,
                     rel.getText()
                 ))
-                startLabel = endLabel
+            startLabel = endLabel
     return relationships
 
 def tokenizeSchema(schema: str) -> []:
