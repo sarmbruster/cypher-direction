@@ -25,7 +25,10 @@ class Pattern:
         return self.__str__()
     
 def getSymbolicName(nodePattern) -> str:
-    return nodePattern.variable().symbolicNameString().unescapedSymbolicNameString().getText()
+    try:
+        return nodePattern.variable().symbolicNameString().unescapedSymbolicNameString().getText()
+    except AttributeError:
+        return None
     
 def getLabel(nodePattern, namedNodes: {}) -> str:
         nodeLabels = nodePattern.labelExpression()
