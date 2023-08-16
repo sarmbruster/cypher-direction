@@ -10,16 +10,16 @@ def strip_or_none(s: str) -> str:
 
 class Pattern:
     """contains normalized patterns from a cypher statement"""
-    def __init__(self, start: str, type: str, end: str, startIndex: int, endIndex: int, text: str):
+    def __init__(self, start: str, types: list[str], end: str, startIndex: int, endIndex: int, text: str):
         self.start = strip_or_none(start)
         self.end = strip_or_none(end)
-        self.type = strip_or_none(type)
+        self.types = types
         self.startIndex = startIndex
         self.endIndex = endIndex
         self.text = text
         
     def __str__(self) -> str:
-        return f"(:{self.start})-[:{self.type}]->(:{self.end})"
+        return f"(:{self.start})-[:{'|'.join(self.types)}]->(:{self.end})"
     
     def __repr__(self) -> str:
         return self.__str__()
@@ -54,11 +54,11 @@ def fetchNamedNodes(tree) -> {}:
                 result[symbolicName] = label
     return result
 
-def getRelationshipType(rel) -> str:
+def getRelationshipTypes(rel) -> list[str]:
     try:
-        return rel.labelExpression().labelExpression4().getText()
+        return sorted(map(lambda r: r.getText(), rel.labelExpression().labelExpression4().labelExpression3()))
     except AttributeError:
-        return None
+        return []
     # relationshipDetail = rel.oC_RelationshipDetail()
     # if relationshipDetail is None:
     #     return None
@@ -95,10 +95,10 @@ def extractRelationships(query: str) -> []:
             right = rel.rightArrow()
             endLabel = getLabel(next(children), namedNodes)
             if left is not None or right is not None:  # we don't care if direction is undefined
-                type = getRelationshipType(rel)           
+                types = getRelationshipTypes(rel)           
                 relationships.append(Pattern(
                     startLabel if right is not None else endLabel, 
-                    type,
+                    types,
                     endLabel if right is not None else startLabel,
                     rel.start.start,
                     rel.stop.stop,
@@ -117,7 +117,7 @@ def tokenizeSchema(schema: str) -> []:
             relType = next(i).string
             next(i) # comma
             endLabel = next(i).string
-            schemaDefinitions.append(Pattern(startLabel, relType, endLabel, 0, 0, None))
+            schemaDefinitions.append(Pattern(startLabel, [relType], endLabel, 0, 0, None))
     return schemaDefinitions
 
 def exactlyOne(iterator):
@@ -127,17 +127,19 @@ def exactlyOne(iterator):
             return True
     return False
 
-def matches_both_abels_reltype(r: Pattern, schemaDefinitions: []) -> bool:
-    return any(filter(lambda s: r.start == s.start and r.end == s.end and r.type==s.type, schemaDefinitions))
+def matches_both_abels_reltype(r: Pattern, schemaDefinitions: list[Pattern]) -> bool:
+    return all(filter(lambda t: any(filter(lambda s: r.start == s.start and r.end == s.end and r.types==s.types, schemaDefinitions)), r.types))
+   # return any(filter(lambda s: r.start == s.start and r.end == s.end and r.types==s.types, schemaDefinitions))
 
-def matches_both_abels_reltype_opposite_direction(r: Pattern, schemaDefinitions: []) -> bool:
-    return any(filter(lambda s: r.start == s.end and r.end == s.start and r.type==s.type, schemaDefinitions))
+def matches_both_abels_reltype_opposite_direction(r: Pattern, schemaDefinitions: list[Pattern]) -> bool:
+    return all(filter(lambda t: any(filter(lambda s: r.start == s.end and r.end == s.start and r.types==s.types, schemaDefinitions)), r.types))
+    #return any(filter(lambda s: r.start == s.end and r.end == s.start and r.types==s.types, schemaDefinitions))
 
-def matches_exactly_one_entry_both_labels_empty_reltype(r: Pattern, schemaDefinitions: []) -> bool:
-    return exactlyOne(filter(lambda s: r.start == s.end and r.end == s.start and r.type is None, schemaDefinitions))
+def matches_exactly_one_entry_both_labels_empty_reltype(r: Pattern, schemaDefinitions: list[Pattern]) -> bool:
+    return exactlyOne(filter(lambda s: r.start == s.end and r.end == s.start and len(r.types)==0, schemaDefinitions))
 
-def matches_onelabel_and_reltype(r: Pattern, schemaDefinitions: []) -> bool:
-    return exactlyOne(filter(lambda s: (r.start is None or r.start == s.end) and (r.end is None or r.end == s.start) and r.type==s.type, schemaDefinitions))
+def matches_onelabel_and_reltype(r: Pattern, schemaDefinitions: list[Pattern]) -> bool:
+    return exactlyOne(filter(lambda s: (r.start is None or r.start == s.end) and (r.end is None or r.end == s.start) and r.types==s.types, schemaDefinitions))
 
 
 
@@ -159,29 +161,36 @@ def reverse(text: str) -> str:
     else:
         raise f"don't know how to deal with {str}"
     
+def reversedQuery(p: Pattern, query: str) -> str :
+    reversedPattern = reverse(p.text)
+    return f"{query[:p.startIndex]}{reversedPattern}{query[p.endIndex+1:]}"
+
+def rule1_graph_doesnt_fit_schema(r: Pattern, schemaDefinitions: list[Pattern], query: str) -> (bool, str):
+    if any(filter(
+        lambda x: 
+            any(filter(
+                lambda y:  x in y.types and ((r.start==y.start and r.end==y.end) or (r.start==y.end and r.end==y.start)), 
+            schemaDefinitions)), 
+        r.types)):
+        return (False, query)
+    else:
+        return (True, '') 
+
+rules = [
+    rule1_graph_doesnt_fit_schema
+]
+    
 def fix_direction(query: str, schema: str):
     relationships = extractRelationships(query)
     print(relationships)
     schemaDefinitions = tokenizeSchema(schema)
     
-
-
-    # rules for inverting relationships
-    # 1) there is a schema entry with both labels and reltype matching pointing opposite direction
-    # 2) there is exactly one schema entry with both labels matching and a unspecified reltype given
+    # evaluate the reversion/replacement rules
     for r in relationships:
 
-        if (not matches_both_abels_reltype(r, schemaDefinitions) and 
-            (matches_both_abels_reltype_opposite_direction(r, schemaDefinitions) 
-            or matches_exactly_one_entry_both_labels_empty_reltype(r, schemaDefinitions)
-            or matches_onelabel_and_reltype(r, schemaDefinitions))):
-        # if next(filter(lambda x: schemaMatch(r, x), schemaDefinitions), None):
-        #     print(f"{r} found in schema")
-        # elif next(filter(lambda x: schemaMatchReverse(r,x), schemaDefinitions), None) or next(filter(lambda x: schemaMatchReversePartial(r, x), schemaDefinitions), None):
-            print(f"{r} reversed found in schema {r.text}")
-            reversedPattern = reverse(r.text)
-            query = f"{query[:r.startIndex]}{reversedPattern}{query[r.endIndex+1:]}"
-        
-        # else:
-        #     raise(f"{r} not found in schema")
+        for rule in rules:
+            (doBreak, query) = rule(r, schemaDefinitions, query)
+            if doBreak:
+                break
+            
     return query
