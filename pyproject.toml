@@ -15,6 +15,11 @@ pytest = "^7.4.0"
 pytest-csv-params = "^1.1.0"
 attrs = "^23.1.0"
 
+[tool.pytest.ini_options]
+log_cli = "True"
+log_cli_level = "debug"
+
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
