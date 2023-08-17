@@ -1,6 +1,8 @@
 from antlr4 import InputStream, CommonTokenStream
 from tokenize import tokenize, OP
 from io import BytesIO
+from logging import debug, info, warning
+import inspect, sys
 from cypher_direction.CypherLexer import CypherLexer
 from cypher_direction.CypherParser import CypherParser
 from cypher_direction.Trees import Trees
@@ -20,6 +22,19 @@ class Pattern:
         
     def __str__(self) -> str:
         return f"(:{self.start})-[:{'|'.join(self.types)}]->(:{self.end})"
+    
+    def __repr__(self) -> str:
+        return self.__str__()
+    
+class SchemaPattern:
+    """representation of schema entried"""
+    def __init__(self, start: str, type: str, end: str):
+        self.start = start
+        self.end = end
+        self.type = type
+        
+    def __str__(self) -> str:
+        return f"(:{self.start})-[:self.type]->(:{self.end})"
     
     def __repr__(self) -> str:
         return self.__str__()
@@ -107,7 +122,7 @@ def extractRelationships(query: str) -> []:
             startLabel = endLabel
     return relationships
 
-def tokenizeSchema(schema: str) -> []:
+def tokenizeSchema(schema: str) -> list[SchemaPattern]:
     schemaDefinitions = []
     i = iter(tokenize(BytesIO(schema.encode('utf-8')).readline))
     while (x := next(i, None)) is not None:
@@ -117,7 +132,7 @@ def tokenizeSchema(schema: str) -> []:
             relType = next(i).string
             next(i) # comma
             endLabel = next(i).string
-            schemaDefinitions.append(Pattern(startLabel, [relType], endLabel, 0, 0, None))
+            schemaDefinitions.append(SchemaPattern(startLabel, relType, endLabel))
     return schemaDefinitions
 
 def exactlyOne(iterator):
@@ -165,31 +180,81 @@ def reversedQuery(p: Pattern, query: str) -> str :
     reversedPattern = reverse(p.text)
     return f"{query[:p.startIndex]}{reversedPattern}{query[p.endIndex+1:]}"
 
-def rule1_graph_doesnt_fit_schema(r: Pattern, schemaDefinitions: list[Pattern], query: str) -> (bool, str):
+def rule00(r: Pattern, schemaDefinitions: list[SchemaPattern], query: str) -> (bool, str):
+    """if we find a full match, skip processing. If there's a full reversed match, reverse the query pattern"""
+    if all(
+        map(lambda t : any(
+            filter(lambda s: t==s.type and r.start==s.start and r.end==s.end, schemaDefinitions)
+        ), r.types)
+    ):
+        return (True, query)
+    elif all(
+        map(lambda t : any(
+            filter(lambda s: t==s.type and r.start==s.end and r.end==s.start, schemaDefinitions)
+        ), r.types)
+    ):
+        return (True, reversedQuery(r, query))
+    else:
+        return (False, query)
+
+def rule01(r: Pattern, schemaDefinitions: list[SchemaPattern], query: str) -> (bool, str):
+    """If the given pattern in a Cypher statement doesn't fit the graph schema, simply return an empty string"""
     if any(filter(
         lambda x: 
             any(filter(
-                lambda y:  x in y.types and ((r.start==y.start and r.end==y.end) or (r.start==y.end and r.end==y.start)), 
+                lambda y:  x==y.type and ((r.start==y.start and r.end==y.end) or (r.start==y.end and r.end==y.start)), 
             schemaDefinitions)), 
         r.types)):
         return (False, query)
     else:
         return (True, '') 
+    
+def rule02(r: Pattern, schemaDefinitions: list[SchemaPattern], query: str) -> (bool, str):
+    """If the relationship is between two nodes of the same labels, there is nothing to validate or correct"""
+    if r.start == r.end:
+        return (True, query)
+    else:
+        return (False, query)
+    
+def rule03(r: Pattern, schemaDefinitions: list[SchemaPattern], query: str) -> (bool, str):
+    """If the input query has an undirected relationship in the pattern, we do not correct it."""
+    # undirected rels are not listed, so continue
+    return (False, query)
 
-rules = [
-    rule1_graph_doesnt_fit_schema
-]
+def rule04(r: Pattern, schemaDefinitions: list[SchemaPattern], query: str) -> (bool, str):
+    """If a node label is missing in the defined pattern, we can still validate if it fits the graph schema"""
+    if r.start is None or r.end is None:
+        if len(r.types) != 1:
+            raise "tmp"
+        if any(filter(lambda x: r.types[0] == x.type and (r.start is None or r.start==x.end) and (r.end is None or r.end==x.start), schemaDefinitions)):
+            return (True, reversedQuery(r, query))
+        else:
+            return (False, query) 
+    return (False, query)
+
+def rule05(r: Pattern, schemaDefinitions: list[SchemaPattern], query: str) -> (bool, str):
+    """If the input query doesn't define the relaitionship type, but at least one node label is given of a pattern, 
+    we check if any relationship exists that matches the pattern and correct it if needed"""
+    return (False, query)
+    
+def getRulesFunctions():
+    return sorted([obj for name,obj in inspect.getmembers(sys.modules[__name__]) 
+        if (inspect.isfunction(obj) and name.startswith('rule') )], key=lambda x: x.__name__)
     
 def fix_direction(query: str, schema: str):
     relationships = extractRelationships(query)
-    print(relationships)
+    info(f"relationships {relationships}")
     schemaDefinitions = tokenizeSchema(schema)
-    
+    info(f"schema {schemaDefinitions}")
+    rules = getRulesFunctions()
     # evaluate the reversion/replacement rules
     for r in relationships:
 
+        
         for rule in rules:
+            debug(f"{rule.__name__} : {query} for {r} ")
             (doBreak, query) = rule(r, schemaDefinitions, query)
+            debug(f"{rule.__name__} : {query} result break {doBreak}")
             if doBreak:
                 break
             
