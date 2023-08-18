@@ -7,4 +7,3 @@ from pytest_csv_params.decorator import csv_params
 def test_statements(statement: str, schema: str, correct_query:str): #, caplog):
     #caplog.set_level(logging.DEBUG)
     assert correct_query == cypher_direction.fix_direction(statement, schema)
-    #pytest.fail("HURZ")
