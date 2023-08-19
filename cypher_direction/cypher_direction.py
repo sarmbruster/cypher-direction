@@ -61,10 +61,8 @@ class Schema:
             for s in self.entries:
                 if type==s.type:
                     if any(filter(lambda x: x==s.start,p.start)) and any(filter(lambda x: x==s.end, p.end)):
-                    #(p.start is None or p.start == s.start) and (p.end is None or p.end == s.end):
                         return Result.MATCH
                     elif any(filter(lambda x: x==s.end,p.start)) and any(filter(lambda x: x==s.start, p.end)):
-                    #elif (p.start is None or p.start == s.end) and (p.end is None or p.end == s.start):
                         return Result.REVERSE_MATCH        
         return Result.NO_MATCH  
     
