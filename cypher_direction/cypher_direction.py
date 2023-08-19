@@ -31,16 +31,16 @@ class SchemaPattern:
     
 class Pattern:
     """contains normalized patterns from a cypher statement"""
-    def __init__(self, start: str, types: list[str], end: str, startIndex: int, endIndex: int, text: str):
-        self.start = strip_or_none(start)
-        self.end = strip_or_none(end)
+    def __init__(self, start: [str], types: list[str], end: [str], startIndex: int, endIndex: int, text: str):
+        self.start = start
+        self.end = end
         self.types = types
         self.startIndex = startIndex
         self.endIndex = endIndex
         self.text = text
         
     def __str__(self) -> str:
-        return f"(:{self.start})-[:{'|'.join(self.types)}]->(:{self.end})"
+        return f"(:{':'.join(self.start)})-[:{'|'.join(self.types)}]->(:{':'.join(self.end)})"
     
     def __repr__(self) -> str:
         return self.__str__()
@@ -60,9 +60,11 @@ class Schema:
         for type in p.types:
             for s in self.entries:
                 if type==s.type:
-                    if (p.start is None or p.start == s.start) and (p.end is None or p.end == s.end):
+                    if any(filter(lambda x: x==s.start,p.start)) and any(filter(lambda x: x==s.end, p.end)):
+                    #(p.start is None or p.start == s.start) and (p.end is None or p.end == s.end):
                         return Result.MATCH
-                    elif (p.start is None or p.start == s.end) and (p.end is None or p.end == s.start):
+                    elif any(filter(lambda x: x==s.end,p.start)) and any(filter(lambda x: x==s.start, p.end)):
+                    #elif (p.start is None or p.start == s.end) and (p.end is None or p.end == s.start):
                         return Result.REVERSE_MATCH        
         return Result.NO_MATCH  
     
@@ -70,18 +72,18 @@ class Schema:
         for type in p.types:
             for s in self.entries:
                 if type==s.type:
-                    if p.start == s.start or p.end == s.end:
+                    if any(filter(lambda x: x==s.start,p.start)) or any(filter(lambda x: x==s.end, p.end)):
                         return Result.MATCH
-                    elif p.start == s.end or p.end == s.start:
-                        return Result.REVERSE_MATCH        
+                    if any(filter(lambda x: x==s.end,p.start)) or any(filter(lambda x: x==s.start, p.end)):
+                        return Result.REVERSE_MATCH
         return Result.NO_MATCH  
     
     def match_unspecified_reltype(self, p: Pattern) -> Result:
-        assert len(p.types)==0
+        assert not p.types
         for s in self.entries:         
-            if (p.start is None or p.start == s.start) and (p.end is None or p.end == s.end):
+            if any(filter(lambda x: x==s.start,p.start)) and any(filter(lambda x: x==s.end, p.end)):
                 return Result.MATCH
-            if (p.start is None or p.start == s.end) and (p.end is None or p.end == s.start):
+            if any(filter(lambda x: x==s.end,p.start)) and any(filter(lambda x: x==s.start, p.end)):
                 return Result.REVERSE_MATCH       
         return Result.NO_MATCH  
     
@@ -98,29 +100,26 @@ def getSymbolicName(nodePattern) -> str:
     except AttributeError:
         return None
     
-def getLabel(nodePattern, namedNodes: {}) -> str:
+def getLabels(nodePattern, namedNodes: {}) -> str:
         nodeLabels = nodePattern.labelExpression()
         if nodeLabels is None:
             symbolicName = getSymbolicName(nodePattern)
-            return namedNodes.get(symbolicName, None) if namedNodes is not None else None
+            return namedNodes.get(symbolicName, [])
         else:
             labels3 = nodeLabels.labelExpression4().labelExpression3()
             if len(labels3)>1:
                 raise "more than one label"
             labels2 = labels3[0].labelExpression2()
-            
-            if len(labels2) > 1:
-                raise "more than one label"
-            return strip_or_none(labels2[0].getText())
+            return list(map(lambda x: strip_or_none(x.getText()), labels2))
 
 def fetchNamedNodes(tree) -> {}:
     result = {}
     for n in Trees.findAllRuleNodes(tree, CypherParser.RULE_nodePattern):
         symbolicName = getSymbolicName(n)
         if symbolicName is not None:
-            label = getLabel(n, None)
-            if label is not None:
-                result[symbolicName] = label
+            labels = getLabels(n, {})
+            if len(labels) > 0:
+                result[symbolicName] = labels
     return result
 
 def getRelationshipTypes(rel) -> list[str]:
@@ -144,26 +143,26 @@ def extractRelationships(query: str) -> []:
     for r in elements:
         if len(r.nodePattern())>0:
             children = r.getChildren()
-            startLabel = getLabel(next(children), namedNodes)
+            startLabels = getLabels(next(children), namedNodes)
 
             while ((rel := next(children, None)) is not None):
                 if isinstance(rel, CypherParser.MaybeQuantifiedRelationshipPatternContext):
                     rel = rel.relationshipPattern()
                 left = rel.leftArrow()
                 right = rel.rightArrow()
-                endLabel = getLabel(next(children), namedNodes)
+                endLabels = getLabels(next(children), namedNodes)
                 if left is not None or right is not None:  # we don't care if direction is undefined
                     types = getRelationshipTypes(rel)    
                     text = rel.getText().replace('{',' {')       
                     relationships.append(Pattern(
-                        startLabel if right is not None else endLabel, 
+                        startLabels if right is not None else endLabels, 
                         types,
-                        endLabel if right is not None else startLabel,
+                        endLabels if right is not None else startLabels,
                         rel.start.start,
                         rel.stop.stop,
                         text
                     ))
-                startLabel = endLabel
+                startLabels = endLabels
     return relationships
 
 def tokenizeSchema(schemaStr: str) -> list[SchemaPattern]:
@@ -201,14 +200,14 @@ def reversedQuery(p: Pattern, query: str) -> str :
 
 def rule00(r: Pattern, schema: Schema, query: str) -> (bool, str):
     """if we find a full match, skip processing. If there's a full reversed match, reverse the query pattern"""
-    if len(r.types)>0:
+    if r.types:
         match schema.match(r):
             case Result.MATCH:
                 return (True, query)
             case Result.REVERSE_MATCH:
                 return (True, reversedQuery(r, query))
             case Result.NO_MATCH:
-                if (r.start!=r.end):
+                if (r.start and r.end and r.start!=r.end):
                     return (True, "")
     return (False, query)
 
@@ -255,7 +254,7 @@ def rule00(r: Pattern, schema: Schema, query: str) -> (bool, str):
 def rule05(r: Pattern, schema: Schema, query: str) -> (bool, str):
     """If the input query doesn't define the relaitionship type, but at least one node label is given of a pattern, 
     we check if any relationship exists that matches the pattern and correct it if needed"""
-    if len(r.types)==0 and ((r.start is not None) or (r.end is not None)):
+    if not r.types and (r.start or r.end):
         match schema.match_unspecified_reltype(r):
             case Result.MATCH:
                 return (True, query)
@@ -264,17 +263,17 @@ def rule05(r: Pattern, schema: Schema, query: str) -> (bool, str):
 
     return (False, query)
 
-# def rule06(r: Pattern, schema: Schema, query: str) -> (bool, str):
-#     """partial match on one label"""
-#     if len(r.types)>0:
-#         match schema.match_one_side(r):
-#             case Result.MATCH:
-#                 return (True, query)
-#             case Result.REVERSE_MATCH:
-#                 return (True, reversedQuery(r, query))
-#             case Result.NO_MATCH:
-#                 return (True, "")
-#     return (False, query)
+def rule06(r: Pattern, schema: Schema, query: str) -> (bool, str):
+    """partial match on one label"""
+    if r.types:
+        match schema.match_one_side(r):
+            case Result.MATCH:
+                return (True, query)
+            case Result.REVERSE_MATCH:
+                return (True, reversedQuery(r, query))
+            # case Result.NO_MATCH:
+            #     return (True, "")
+    return (False, query)
     
 def getRulesFunctions():
     return sorted([obj for name,obj in inspect.getmembers(sys.modules[__name__]) 
@@ -291,8 +290,6 @@ def fix_direction(query: str, schemaStr: str):
     rules = getRulesFunctions()
     # evaluate the reversion/replacement rules
     for r in relationships:
-
-        
         for rule in rules:
             debug(f"{rule.__name__} : {remove_line_breaks(query)} for {r} ")
             (doBreak, query) = rule(r, schema, query)
