@@ -52,36 +52,35 @@ class Schema:
 
     def add(self, start: str, type: str, end: str):
         self.entries.append(SchemaPattern(start, type, end))
-
-    def for_reltype(self, reltype: str):
-        return filter(lambda x: x.type==reltype, self.entries)
     
     def match(self, p: Pattern) -> Result:
+        assert p.types
         for type in p.types:
             for s in self.entries:
                 if type==s.type:
-                    if any(filter(lambda x: x==s.start,p.start)) and any(filter(lambda x: x==s.end, p.end)):
+                    if s.start in p.start and s.end in p.end:
                         return Result.MATCH
-                    elif any(filter(lambda x: x==s.end,p.start)) and any(filter(lambda x: x==s.start, p.end)):
+                    elif s.start in p.end and s.end in p.start:
                         return Result.REVERSE_MATCH        
         return Result.NO_MATCH  
     
     def match_one_side(self, p: Pattern) -> Result:
+        assert p.types
         for type in p.types:
             for s in self.entries:
                 if type==s.type:
-                    if any(filter(lambda x: x==s.start,p.start)) or any(filter(lambda x: x==s.end, p.end)):
+                    if s.start in p.start or s.end in p.end:
                         return Result.MATCH
-                    if any(filter(lambda x: x==s.end,p.start)) or any(filter(lambda x: x==s.start, p.end)):
+                    if s.start in p.end or s.end in p.start:
                         return Result.REVERSE_MATCH
         return Result.NO_MATCH  
     
     def match_unspecified_reltype(self, p: Pattern) -> Result:
         assert not p.types
         for s in self.entries:         
-            if any(filter(lambda x: x==s.start,p.start)) and any(filter(lambda x: x==s.end, p.end)):
+            if s.start in p.start and s.end in p.end:
                 return Result.MATCH
-            if any(filter(lambda x: x==s.end,p.start)) and any(filter(lambda x: x==s.start, p.end)):
+            if s.start in p.end and s.end in p.start:
                 return Result.REVERSE_MATCH       
         return Result.NO_MATCH  
     
@@ -116,7 +115,7 @@ def fetchNamedNodes(tree) -> {}:
         symbolicName = getSymbolicName(n)
         if symbolicName is not None:
             labels = getLabels(n, {})
-            if len(labels) > 0:
+            if labels:
                 result[symbolicName] = labels
     return result
 
@@ -139,7 +138,7 @@ def extractRelationships(query: str) -> []:
     elements = Trees.findAllRuleNodes(tree, CypherParser.RULE_pathPatternAtoms)
     elements.extend(Trees.findAllRuleNodes(tree, CypherParser.RULE_pathPatternNonEmpty))
     for r in elements:
-        if len(r.nodePattern())>0:
+        if r.nodePattern():
             children = r.getChildren()
             startLabels = getLabels(next(children), namedNodes)
 

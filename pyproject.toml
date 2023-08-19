@@ -13,11 +13,11 @@ antlr4-python3-runtime = "^4.13.0"
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.0"
 pytest-csv-params = "^1.1.0"
-attrs = "^23.1.0"
 
-[tool.pytest.ini_options]
-log_cli = "True"
-log_cli_level = "debug"
+# enable cli log for debugging
+#[tool.pytest.ini_options]
+#log_cli = "True"
+#log_cli_level = "debug"
 
 [build-system]
 requires = ["poetry-core"]
