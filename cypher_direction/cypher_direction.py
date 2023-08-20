@@ -2,7 +2,7 @@ from antlr4 import InputStream, CommonTokenStream
 from tokenize import tokenize, OP
 from io import BytesIO
 from logging import debug, info
-import inspect, sys
+import operator
 from enum import Enum
 from cypher_direction.CypherLexer import CypherLexer
 from cypher_direction.CypherParser import CypherParser
@@ -52,27 +52,16 @@ class Schema:
 
     def add(self, start: str, type: str, end: str):
         self.entries.append(SchemaPattern(start, type, end))
-    
-    def match(self, p: Pattern) -> Result:
+
+    def match(self, p: Pattern, op: operator) -> Result:
         assert p.types
         for type in p.types:
             for s in self.entries:
                 if type==s.type:
-                    if s.start in p.start and s.end in p.end:
+                    if op(s.start in p.start, s.end in p.end):
                         return Result.MATCH
-                    elif s.start in p.end and s.end in p.start:
+                    elif op(s.start in p.end, s.end in p.start):
                         return Result.REVERSE_MATCH        
-        return Result.NO_MATCH  
-    
-    def match_one_side(self, p: Pattern) -> Result:
-        assert p.types
-        for type in p.types:
-            for s in self.entries:
-                if type==s.type:
-                    if s.start in p.start or s.end in p.end:
-                        return Result.MATCH
-                    if s.start in p.end or s.end in p.start:
-                        return Result.REVERSE_MATCH
         return Result.NO_MATCH  
     
     def match_unspecified_reltype(self, p: Pattern) -> Result:
@@ -188,44 +177,29 @@ def reversedQuery(p: Pattern, query: str) -> str :
     reversedPattern = reverse(p.text)
     return f"{query[:p.startIndex]}{reversedPattern}{query[p.endIndex+1:]}"
 
-def rule01(r: Pattern, schema: Schema, query: str) -> (bool, str):
-    """if we find a full match, skip processing. If there's a full reversed match, reverse the query pattern"""
+def evaluate_relationship(r: Pattern, schema: Schema, query: str) -> str:
     if r.types:
-        match schema.match(r):
+        match schema.match(r, operator.__and__):
             case Result.MATCH:
-                return (True, query)
+                return query
             case Result.REVERSE_MATCH:
-                return (True, reversedQuery(r, query))
+                return reversedQuery(r, query)
             case Result.NO_MATCH:
                 if (r.start and r.end and r.start!=r.end):
-                    return (True, "")
-    return (False, query)
-
-def rule02(r: Pattern, schema: Schema, query: str) -> (bool, str):
-    """If the input query doesn't define the relaitionship type, but at least one node label is given of a pattern, 
-    we check if any relationship exists that matches the pattern and correct it if needed"""
-    if not r.types and (r.start or r.end):
+                    return ""
+                else: 
+                    match schema.match(r, operator.__or__):
+                        case Result.MATCH:
+                            return query
+                        case Result.REVERSE_MATCH:
+                            return reversedQuery(r, query)
+    else:
         match schema.match_unspecified_reltype(r):
             case Result.MATCH:
-                return (True, query)
+                return query
             case Result.REVERSE_MATCH:
-                return (True, reversedQuery(r, query))
-
-    return (False, query)
-
-def rule03(r: Pattern, schema: Schema, query: str) -> (bool, str):
-    """partial match on one label"""
-    if r.types:
-        match schema.match_one_side(r):
-            case Result.MATCH:
-                return (True, query)
-            case Result.REVERSE_MATCH:
-                return (True, reversedQuery(r, query))
-    return (False, query)
-    
-def getRulesFunctions():
-    return sorted([obj for name,obj in inspect.getmembers(sys.modules[__name__]) 
-        if (inspect.isfunction(obj) and name.startswith('rule') )], key=lambda x: x.__name__)
+                return reversedQuery(r, query)
+    return query
 
 def remove_line_breaks(s:str):
     return s.replace('\n', ' ').replace('\r',' ')
@@ -235,14 +209,10 @@ def fix_direction(query: str, schemaStr: str):
     info(f"relationships {relationships}")
     schema = tokenizeSchema(schemaStr)
     info(f"schema {schema}")
-    rules = getRulesFunctions()
     # evaluate the reversion/replacement rules
     for r in relationships:
-        for rule in rules:
-            debug(f"{rule.__name__} : {remove_line_breaks(query)} for {r} ")
-            (doBreak, query) = rule(r, schema, query)
-            debug(f"{rule.__name__} : {remove_line_breaks(query)} result break {doBreak}")
-            if doBreak:
-                break
+        debug(f"{remove_line_breaks(query)} for {r} ")
+        query = evaluate_relationship(r, schema, query)
+        debug(f"{remove_line_breaks(query)} result")
             
     return query
