@@ -13,8 +13,8 @@ Neo4j does provide the Cypher grammer in the form of an [ANTLR G4](https://githu
 * <https://github.com/neo4j/neo4j/blob/5.10/community/cypher/front-end/antlr-parser/src/main/antlr4/org/neo4j/cypher/internal/parser/CypherLexer.g4>
 
 > [!WARNING] Originally I've tried to use the G4 file supplied by [openCypher](https://opencypher.org/resources/).
-During first tests it became clear that this grammer file does not reflect the current state of Cypher using in Neo4j 5.10.x.
-As an example openCypher's grammer file does not support subqueries `CALL { <subquery>}`.
+> During first tests it became clear that this grammer file does not reflect the current state of Cypher using in Neo4j 5.10.x.
+> As an example openCypher's grammer file does not support subqueries `CALL { <subquery> }`.
 
 [Antlr](https://www.antlr.org/) 4.13.0 is used to generate python code from the grammer file:
 
